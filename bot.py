@@ -1,288 +1,240 @@
 import os
 import time
+import math
 import asyncio
-from threading import Thread
-from flask import Flask
-from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+import requests
+import traceback
 from pymongo import MongoClient
+from flask import Flask
+from threading import Thread
+from pyrogram import Client, filters
+from pyrogram.types import Message
 
-# =============================================================
-# BASIC FIXED CONFIG
-# =============================================================
-
-OWNER_ID = 1598576202
-LOG_CHANNEL = -1003286415377
-
+# --------------------------
+#        ENV VARIABLES
+# --------------------------
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-MONGO_URL = os.getenv("MONGO_URL")  # You will fill on Render
+FORCE_SUB = os.getenv("FORCE_SUB")  # channel username
+OWNER_ID = int(os.getenv("OWNER_ID"))
+LOG_CHANNEL = int(os.getenv("LOG_CHANNEL"))
+MONGO_URI = os.getenv("MONGO_URI")
 
-# =============================================================
-# FLASK KEEP-ALIVE
-# =============================================================
+# --------------------------
+#      MONGODB CONNECT
+# --------------------------
+mongo = MongoClient(MONGO_URI)
+db = mongo["tg_bot"]
+users_col = db["users"]
+ban_col = db["banned"]
+caption_col = db["caption"]
 
+# --------------------------
+#         FLASK
+# --------------------------
 app = Flask(__name__)
 
-@app.route("/")
+@app.route('/')
 def home():
-    return "Technical Serena - URL Uploader Bot Running"
+    return "Bot Running Successfully!"
 
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
 
-# =============================================================
-# TELEGRAM BOT
-# =============================================================
+Thread(target=run_flask).start()
 
+# --------------------------
+#   BOT CLIENT START
+# --------------------------
 bot = Client(
-    "TECHNICAL_SERENA_URL_UPLOADER",
+    "DownloaderBot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
+    bot_token=BOT_TOKEN
 )
 
-# =============================================================
-# MONGO DB SETUP
-# =============================================================
 
-mongo = MongoClient(MONGO_URL)
-db = mongo["SERENA_UPLOADER"]
+# --------------------------
+#   PROGRESS BAR FUNCTION
+# --------------------------
+async def progress_bar(current, total, message: Message, start_time):
+    now = time.time()
+    diff = now - start_time
+    if diff == 0:
+        diff = 1
 
-users_db = db["users"]
-settings_db = db["settings"]
-stats_db = db["stats"]
+    percentage = current * 100 / total
+    speed = current / diff
+    eta = int((total - current) / speed)
 
+    bar_length = 20
+    filled = int(bar_length * percentage / 100)
+    bar = "█" * filled + "░" * (bar_length - filled)
 
-# =============================================================
-# MONGO HELPERS
-# =============================================================
-
-def add_user(uid):
-    if not users_db.find_one({"_id": uid}):
-        users_db.insert_one({"_id": uid, "premium": False})
-
-
-def authorize(uid):
-    return users_db.find_one({"_id": uid, "premium": True})
-
-
-def ban_user(uid):
-    users_db.update_one({"_id": uid}, {"$set": {"banned": True}}, upsert=True)
-
-
-def is_banned(uid):
-    data = users_db.find_one({"_id": uid})
-    return data and data.get("banned") is True
-
-
-def set_caption(uid, caption):
-    settings_db.update_one({"_id": uid}, {"$set": {"caption": caption}}, upsert=True)
-
-
-def get_caption(uid):
-    data = settings_db.find_one({"_id": uid})
-    return data.get("caption") if data else None
-
-
-def reset_settings(uid):
-    settings_db.delete_one({"_id": uid})
-
-
-# =============================================================
-# CHECK AUTH
-# =============================================================
-
-async def check_permission(message):
-    uid = message.from_user.id
-
-    if uid == OWNER_ID:
-        return True
-
-    if is_banned(uid):
-        await message.reply("⛔ You are banned from using this bot.")
-        return False
-
-    if not authorize(uid):
-        await message.reply("❌ Access Denied.\nAsk Admin for Premium Access.")
-        return False
-
-    return True
-
-
-# =============================================================
-# START
-# =============================================================
-
-@bot.on_message(filters.command("start"))
-async def start_cmd(client, message: Message):
-    add_user(message.from_user.id)
-
-    await message.reply(
-        f"👋 Welcome to **URL UPLOADER BOT**\nBrand: **TECHNICAL SERENA**\n"
-        f"Use /help to see commands."
+    text = (
+        f"**Uploading…**\n"
+        f"{bar} `{percentage:.1f}%`\n"
+        f"**Speed:** {speed/1024/1024:.2f} MB/s\n"
+        f"**Uploaded:** {current/1024/1024:.2f} MB / {total/1024/1024:.2f} MB\n"
+        f"**ETA:** {eta}s"
     )
 
     try:
-        await bot.send_message(
-            LOG_CHANNEL,
-            f"NEW USER STARTED:\nName: {message.from_user.first_name}\nID: `{message.from_user.id}`"
-        )
+        await message.edit(text)
     except:
         pass
 
 
-# =============================================================
-# HELP
-# =============================================================
+# --------------------------
+#   STREAMABLE / DIRECT DL
+# --------------------------
+def download_file(url, file_path):
+    r = requests.get(url, stream=True)
+    total = int(r.headers.get("content-length", 0))
 
-@bot.on_message(filters.command("help"))
-async def help_cmd(client, message):
-    await message.reply(
-        "**User Commands:**\n"
-        "/start – Check bot alive\n"
-        "/help – Commands list\n"
-        "/ping – Bot latency\n"
-        "/id – Show your Telegram ID\n"
-        "/caption <text> – Auto numbered captions\n"
-        "/bulk – Bulk Downloader\n\n"
-        "**Settings:**\n"
-        "/settings – Replace, Remove Words, Reset\n\n"
-        "**Admin:**\n"
-        "/add <user_id> – Give premium access\n"
-        "/remove <user_id> – Ban user"
-    )
+    with open(file_path, "wb") as f:
+        downloaded = 0
+        for chunk in r.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+    return file_path
 
 
-# =============================================================
-# ADMIN — ADD PREMIUM USER
-# =============================================================
+# --------------------------
+#        FORCE SUB
+# --------------------------
+async def check_force(chat_id):
+    try:
+        member = await bot.get_chat_member(FORCE_SUB, chat_id)
+        return member.status not in ["kicked", "left"]
+    except:
+        return False
+
+
+# --------------------------
+#         COMMANDS
+# --------------------------
+
+@bot.on_message(filters.command("start"))
+async def start(_, m: Message):
+    user_id = m.from_user.id
+
+    if ban_col.find_one({"user_id": user_id}):
+        return await m.reply("❌ You are banned from using this bot.")
+
+    if not await check_force(user_id):
+        return await m.reply(
+            f"⚠ Join @{FORCE_SUB} to use this bot."
+        )
+
+    if not users_col.find_one({"user_id": user_id}):
+        users_col.insert_one({"user_id": user_id})
+
+    await bot.send_message(LOG_CHANNEL, f"✅ New User → {user_id}")
+
+    await m.reply("Welcome! Send Streamable or direct link.")
+
 
 @bot.on_message(filters.command("add"))
-async def add_premium(client, message):
-    if message.from_user.id != OWNER_ID:
-        return await message.reply("❌ Only owner can use this.")
+async def add_user(_, m: Message):
+    if m.from_user.id != OWNER_ID:
+        return
 
-    if len(message.command) < 2:
-        return await message.reply("Usage: /add <user_id>")
+    try:
+        uid = int(m.text.split(" ")[1])
+        ban_col.delete_one({"user_id": uid})
+        users_col.insert_one({"user_id": uid})
+        await m.reply(f"✅ User {uid} added.")
+    except:
+        await m.reply("❌ Invalid user id.")
 
-    uid = int(message.command[1])
-    users_db.update_one({"_id": uid}, {"$set": {"premium": True}}, upsert=True)
-
-    await message.reply(f"✅ `{uid}` is now PREMIUM user.")
-    await bot.send_message(LOG_CHANNEL, f"PREMIUM ADDED: `{uid}`")
-
-
-# =============================================================
-# ADMIN — REMOVE / BAN USER
-# =============================================================
 
 @bot.on_message(filters.command("remove"))
-async def remove_user(client, message):
-    if message.from_user.id != OWNER_ID:
-        return await message.reply("❌ Only owner can use this.")
+async def remove_user(_, m: Message):
+    if m.from_user.id != OWNER_ID:
+        return
 
-    if len(message.command) < 2:
-        return await message.reply("Usage: /remove <user_id>")
+    try:
+        uid = int(m.text.split(" ")[1])
+        ban_col.insert_one({"user_id": uid})
+        await m.reply(f"❌ User {uid} banned.")
+    except:
+        await m.reply("❌ Invalid user id.")
 
-    uid = int(message.command[1])
-    ban_user(uid)
-
-    await message.reply(f"⛔ `{uid}` is banned.")
-    await bot.send_message(LOG_CHANNEL, f"BANNED: `{uid}`")
-
-
-# =============================================================
-# CAPTION GENERATOR
-# =============================================================
 
 @bot.on_message(filters.command("caption"))
-async def caption_cmd(client, message):
-    if not await check_permission(message):
+async def set_caption(_, m: Message):
+    user_id = m.from_user.id
+
+    if user_id != OWNER_ID:
+        return await m.reply("❌ Only owner can set caption.")
+
+    text = m.text.split(" ", 1)[1]
+    caption_col.update_one({}, {"$set": {"text": text}}, upsert=True)
+    await m.reply("✅ Caption updated.")
+
+
+@bot.on_message(filters.command("users"))
+async def users_list(_, m):
+    if m.from_user.id != OWNER_ID:
         return
-
-    if len(message.command) < 2:
-        return await message.reply("Usage: /caption <text>")
-
-    text = " ".join(message.command[1:])
-
-    result = ""
-    for i in range(1, 51):  # 001–050
-        result += f"{i:03d} - {text}\n"
-
-    await message.reply(result)
+    total = users_col.count_documents({})
+    await m.reply(f"Total Users: {total}")
 
 
-# =============================================================
-# SETTINGS MENU
-# =============================================================
-
-@bot.on_message(filters.command("settings"))
-async def settings_cmd(client, message):
-    if not await check_permission(message):
+@bot.on_message(filters.command("banned"))
+async def banned_list(_, m):
+    if m.from_user.id != OWNER_ID:
         return
-
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Replace Word", callback_data="replace_word")],
-        [InlineKeyboardButton("Remove Word", callback_data="remove_word")],
-        [InlineKeyboardButton("Reset Settings", callback_data="reset_settings")],
-        [InlineKeyboardButton("Stats", callback_data="stats")]
-    ])
-
-    await message.reply("⚙ **Settings Menu:**", reply_markup=btn)
+    total = ban_col.count_documents({})
+    await m.reply(f"Banned Users: {total}")
 
 
-# =============================================================
-# CALLBACK HANDLERS
-# =============================================================
+# --------------------------
+#   MAIN DOWNLOAD HANDLER
+# --------------------------
+@bot.on_message(filters.text & ~filters.command([]))
+async def process_link(_, m: Message):
+    user_id = m.from_user.id
 
-@bot.on_callback_query()
-async def cb_handler(client, query):
-    uid = query.from_user.id
+    if ban_col.find_one({"user_id": user_id}):
+        return await m.reply("❌ You are banned.")
 
-    if query.data == "reset_settings":
-        reset_settings(uid)
-        return await query.message.edit("🔄 Settings Reset Successfully.")
-
-    if query.data == "stats":
-        total_users = users_db.count_documents({})
-        banned = users_db.count_documents({"banned": True})
-        premium = users_db.count_documents({"premium": True})
-
-        await query.message.edit(
-            f"📊 **Bot Stats**\n\n"
-            f"Total Users: {total_users}\n"
-            f"Premium Users: {premium}\n"
-            f"Banned: {banned}"
+    if not await check_force(user_id):
+        return await m.reply(
+            f"⚠ Join @{FORCE_SUB} to use this bot."
         )
 
+    url = m.text.strip()
+    msg = await m.reply("🔄 Processing…")
 
-# =============================================================
-# BULK DOWNLOAD COMMAND (NEXT UPGRADE FRAMEWORK)
-# =============================================================
+    try:
+        file_path = f"{user_id}_video.mp4"
+        download_file(url, file_path)
 
-@bot.on_message(filters.command("bulk"))
-async def bulk_cmd(client, message):
-    if not await check_permission(message):
-        return
+        caption_doc = caption_col.find_one({})
+        cap = caption_doc["text"] if caption_doc else ""
 
-    await message.reply(
-        "📥 **Bulk Mode Activated**\n"
-        "Send multiple URLs line-by-line.\n"
-        "When done, send `/done`."
-    )
+        start_t = time.time()
 
-
-# =============================================================
-# RUN BOT + FLASK
-# =============================================================
-
-if __name__ == "__main__":
-    Thread(
-        target=lambda: app.run(
-            host="0.0.0.0",
-            port=int(os.getenv("PORT", 10000)),
-            debug=False
+        await bot.send_video(
+            m.chat.id,
+            video=file_path,
+            caption=cap,
+            progress=progress_bar,
+            progress_args=(msg, start_t)
         )
-    ).start()
 
-    bot.run()
+        os.remove(file_path)
+        await msg.delete()
+
+        await bot.send_message(LOG_CHANNEL, f"🎬 Uploaded for {user_id}")
+
+    except Exception as e:
+        await msg.edit(f"❌ Error:\n{e}")
+        traceback.print_exc()
+
+
+bot.run()
