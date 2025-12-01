@@ -6,8 +6,8 @@ from pyrogram.errors import RPCError
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from motor.motor_asyncio import AsyncIOMotorClient
-import uvicorn
 from fastapi import FastAPI
+import uvicorn
 
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
@@ -22,8 +22,9 @@ premium_col = db["premium"]
 session_col = db["sessions"]
 
 bot = Client("serena_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-app = FastAPI()
 TCACHE = {}
+
+app = FastAPI()
 
 def parse_tme(link):
     try:
@@ -113,26 +114,22 @@ async def fetch_via_tele(client, chat, msgid):
     except:
         return None
 
-@app.on_event("startup")
-async def _startup():
+# Lifespan handler instead of deprecated on_event
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await bot.start()
     await send_log("BOT STARTED")
-
-@app.on_event("shutdown")
-async def _shutdown():
-    try:
-        await bot.stop()
-    except:
-        pass
+    yield
+    await bot.stop()
     for c in list(TCACHE.values()):
         try:
             await c.disconnect()
         except:
             pass
 
-@app.get("/")
-async def _root():
-    return {"status": "running"}
+app = FastAPI(lifespan=lifespan)
 
 all_commands = ["start","help","login","logout","get","bulk","addpremium","removepremium"]
 
