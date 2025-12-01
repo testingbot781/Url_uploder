@@ -1,12 +1,13 @@
 import os
 import asyncio
 from urllib.parse import urlparse
-from fastapi import FastAPI
 from pyrogram import Client, filters
 from pyrogram.errors import RPCError
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from motor.motor_asyncio import AsyncIOMotorClient
+import uvicorn
+from fastapi import FastAPI
 
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
@@ -133,6 +134,8 @@ async def _shutdown():
 async def _root():
     return {"status": "running"}
 
+all_commands = ["start","help","login","logout","get","bulk","addpremium","removepremium"]
+
 @bot.on_message(filters.command("start"))
 async def cmd_start(client, message):
     uid = message.from_user.id
@@ -142,13 +145,15 @@ async def cmd_start(client, message):
 
 @bot.on_message(filters.command("help"))
 async def cmd_help(client, message):
-    await message.reply("/login - save session string\n/logout - remove session\n/get <link> - download single\n/bulk <link> <count> - bulk up to 500\n/addpremium <id> (owner)\n/removepremium <id> (owner)")
+    await message.reply(
+        "Commands:\n/start - welcome\n/help - this info\n/login - save session\n/logout - remove session\n/get <link> - download single\n/bulk <link> <count> - bulk\n/addpremium <id> - owner only\n/removepremium <id> - owner only"
+    )
 
 @bot.on_message(filters.command("login"))
 async def cmd_login(client, message):
     await message.reply("Send your Telethon string session now")
 
-@bot.on_message(filters.private & ~filters.command())
+@bot.on_message(filters.private & ~filters.command(all_commands))
 async def save_session_msg(client, message):
     uid = message.from_user.id
     text = message.text or ""
@@ -296,5 +301,4 @@ async def cmd_bulk(client, message):
     await send_log(f"BULK by {uid} requested {count} from {chat}")
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
