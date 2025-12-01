@@ -105,22 +105,18 @@ async def fetch_via_pyrogram(chat, msgid):
 
 async def fetch_via_tele(client, chat, msgid):
     try:
-        if isinstance(chat, int):
-            entity = await client.get_entity(chat)
-        else:
-            entity = await client.get_entity(chat)
+        entity = await client.get_entity(chat)
         m = await client.get_messages(entity, ids=msgid)
         return m
     except:
         return None
 
-# Lifespan handler instead of deprecated on_event
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await bot.start()
-    await send_log("BOT STARTED")
+    await send_log("BOT STARTED ✅")
     yield
     await bot.stop()
     for c in list(TCACHE.values()):
@@ -130,6 +126,10 @@ async def lifespan(app: FastAPI):
             pass
 
 app = FastAPI(lifespan=lifespan)
+
+@app.get("/")
+async def root():
+    return {"status": "Bot is running ✅", "brand": "Technical Serena"}
 
 all_commands = ["start","help","login","logout","get","bulk","addpremium","removepremium"]
 
@@ -192,110 +192,6 @@ async def cmd_remove_prem(client, message):
         await send_log(f"PREMIUM REMOVED {uid}")
     except:
         await message.reply("Usage: /removepremium user_id")
-
-@bot.on_message(filters.command("get"))
-async def cmd_get(client, message):
-    uid = message.from_user.id
-    if not await is_premium(uid):
-        return await message.reply("Premium required")
-    parts = message.text.split(maxsplit=1)
-    if len(parts) != 2:
-        return await message.reply("Usage: /get <t.me link>")
-    link = parts[1].strip()
-    parsed = parse_tme(link)
-    if not parsed:
-        return await message.reply("Invalid link")
-    chat, msgid = parsed
-    m = await fetch_via_pyrogram(chat, msgid)
-    tele_used = False
-    if not m:
-        tc = await get_tele_client(uid)
-        if not tc:
-            return await message.reply("Private content: login required (/login)")
-        m = await fetch_via_tele(tc, chat, msgid)
-        tele_used = True
-    if not m:
-        return await message.reply("Message not found")
-    try:
-        status = await message.reply("Downloading...")
-        if tele_used:
-            path = await m.download_media()
-        else:
-            path = await m.download()
-        up_msg = await message.reply("Uploading...")
-        start = asyncio.get_event_loop().time()
-        cb = make_progress_cb(up_msg, start)
-        await bot.send_document(uid, path, progress=cb)
-        try:
-            await status.delete()
-        except:
-            pass
-        await send_log(f"GET by {uid} from {chat}/{msgid}")
-    except Exception as e:
-        await message.reply("Failed")
-        await send_log(f"ERROR_GET {e}")
-
-@bot.on_message(filters.command("bulk"))
-async def cmd_bulk(client, message):
-    uid = message.from_user.id
-    if not await is_premium(uid):
-        return await message.reply("Premium required")
-    parts = message.text.split()
-    if len(parts) < 3:
-        return await message.reply("Usage: /bulk <link> <count>")
-    link = parts[1]
-    try:
-        count = int(parts[2])
-    except:
-        return await message.reply("Count must be number")
-    if count < 1 or count > 500:
-        return await message.reply("Count 1..500")
-    parsed = parse_tme(link)
-    if not parsed:
-        return await message.reply("Invalid link")
-    chat, start_msg = parsed
-    tc = await get_tele_client(uid)
-    use_tele = False
-    if tc:
-        use_tele = True
-    await message.reply(f"Starting bulk {count}")
-    done = 0
-    for i in range(count):
-        mid = start_msg - i
-        m = None
-        if not use_tele:
-            try:
-                m = await fetch_via_pyrogram(chat, mid)
-            except:
-                m = None
-        if not m and use_tele:
-            try:
-                m = await fetch_via_tele(tc, chat, mid)
-            except:
-                m = None
-        if not m:
-            continue
-        try:
-            info = await message.reply(f"Downloading {mid}")
-            if use_tele and hasattr(m, "download_media"):
-                path = await m.download_media()
-            else:
-                path = await m.download()
-            up = await message.reply(f"Uploading {mid}")
-            start = asyncio.get_event_loop().time()
-            cb = make_progress_cb(up, start)
-            await bot.send_document(uid, path, progress=cb)
-            try:
-                await info.delete()
-                await up.delete()
-            except:
-                pass
-            done += 1
-            await asyncio.sleep(10)
-        except Exception:
-            pass
-    await message.reply(f"Bulk done. Sent: {done}")
-    await send_log(f"BULK by {uid} requested {count} from {chat}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
