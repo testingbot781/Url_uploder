@@ -1,92 +1,98 @@
 import os
 import asyncio
-import threading
-from flask import Flask
+from fastapi import FastAPI
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.enums import ParseMode
 
-# ───────────────────────────────────────────────
-# FIXED CONSTANTS
-# ───────────────────────────────────────────────
-OWNER_ID = 1598576202
-LOG_CHANNEL = -1003286415377
-
+# -------------------------
+# CONFIG
+# -------------------------
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+LOG_CHANNEL = int(os.getenv("LOG_CHANNEL", "-1003286415377"))
+OWNER_ID = int(os.getenv("OWNER_ID", "1598576202"))
 
-# ───────────────────────────────────────────────
-# FLASK FOR RENDER
-# ───────────────────────────────────────────────
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "🔥 Bot Live — Powered by Technical Serena"
-
-# ───────────────────────────────────────────────
-# PYROGRAM BOT CLIENT
-# ───────────────────────────────────────────────
+# -------------------------
+# BOT CLIENT
+# -------------------------
 bot = Client(
-    "TS_SaveBot",
+    "SerenaBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    in_memory=True
+    parse_mode=ParseMode.HTML
 )
 
-# ───────────────────────────────────────────────
+# -------------------------
+# FASTAPI (KEEP ALIVE)
+# -------------------------
+app = FastAPI()
+
+@app.get("/")
+async def home():
+    return {"status": "running", "message": "Serena V2 Online"}
+
+# -------------------------
 # COMMANDS
-# ───────────────────────────────────────────────
+# -------------------------
 
 @bot.on_message(filters.command("start"))
-async def start_cmd(_, m):
-    await m.reply(
-        "👋 **Welcome to Technical Serena Bot**\n"
-        "Public message link bhejo, bot download karega."
+async def start_cmd(client, message):
+    await message.reply(
+        "👋 <b>Welcome!</b>\n\n"
+        "Main active hoon. Use /help to explore commands."
     )
-    await bot.send_message(LOG_CHANNEL, f"Start used by {m.from_user.id}")
+    await client.send_message(LOG_CHANNEL, f"START used by {message.from_user.id}")
 
 @bot.on_message(filters.command("help"))
-async def help_cmd(_, m):
-    await m.reply("📘 Send any PUBLIC post link to download.")
+async def help_cmd(client, message):
+    await message.reply(
+        "📘 <b>Help Menu</b>\n\n"
+        "/start – Bot Online Check\n"
+        "/help – Commands List\n"
+        "/ping – Speed Test\n"
+        "/about – Bot Info\n"
+    )
 
+@bot.on_message(filters.command("ping"))
+async def ping_cmd(client, message):
+    await message.reply("🏓 Pong!")
 
-# Example message downloader
-@bot.on_message(filters.regex("https://t.me/"))
-async def download_msg(_, m):
+@bot.on_message(filters.command("about"))
+async def about_cmd(client, message):
+    await message.reply(
+        "🤖 <b>Serena V2 Bot</b>\n"
+        "Optimized for Render deployment.\n"
+        "Fast • Stable • Clean Architecture."
+    )
+
+# -------------------------
+# AUTO LOGGING ALL EXCEPT COMMANDS
+# -------------------------
+
+@bot.on_message(filters.private & ~filters.command(["start", "help", "ping", "about"]))
+async def log_all(client, msg):
     try:
-        link = m.text.strip()
-        parts = link.split("/")
-        msg_id = int(parts[-1])
-        chat = parts[-2]
+        await client.send_message(LOG_CHANNEL, f"User {msg.from_user.id} sent: {msg.text}")
+    except:
+        pass
 
-        temp = await m.reply("⏳ Fetching...")
+# -------------------------
+# BOT RUNNER (SAFE)
+# -------------------------
 
-        msg = await bot.get_messages(chat, msg_id)
-        if not msg:
-            return await temp.edit("❌ Message Not Found.")
+async def main():
+    print("Starting bot...")
+    await bot.start()
+    print("Bot started successfully.")
 
-        file_path = await msg.download()
-        await m.reply_document(file_path, caption="Done ✓")
+    await bot.send_message(LOG_CHANNEL, "🚀 Serena V2 is now LIVE on Render!")
 
-        await temp.delete()
-    except Exception as e:
-        await bot.send_message(LOG_CHANNEL, f"ERROR: {e}")
-        await m.reply("⚠️ Failed to fetch message.")
-
-
-# ───────────────────────────────────────────────
-# RUN PYROGRAM AND FLASK TOGETHER
-# ───────────────────────────────────────────────
-
-def start_bot():
-    asyncio.run(bot.start())
-    asyncio.get_event_loop().run_forever()
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    # Pyrogram in thread
-    threading.Thread(target=start_bot).start()
-
-    # Flask main
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot Stopped.")
