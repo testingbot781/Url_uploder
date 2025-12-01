@@ -1,5 +1,4 @@
 pyrogram==2.0.106
 tgcrypto
-pymongo
+pymongo[srv]==4.6.3
 flask
-requests
