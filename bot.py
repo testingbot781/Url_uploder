@@ -12,12 +12,12 @@ from telethon.sessions import StringSession
 from motor.motor_asyncio import AsyncIOMotorClient
 
     # Constants
-    OWNER_ID = 1598576202
-    LOG_CHANNEL = -1003286415377
+OWNER_ID = 1598576202
+LOG_CHANNEL = -1003286415377
 
-    API_ID = int(os.getenv("API_ID"))
-    API_HASH = os.getenv("API_HASH")
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
     app = Flask(__name__)
 
