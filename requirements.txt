@@ -1,5 +1,6 @@
-pyrogram==2.1.0
+pyrogram==2.0.106
 tgcrypto==1.2.5
 motor==4.3.3
 fastapi==0.114.0
 uvicorn==0.26.1
+aiofiles==23.1.0
