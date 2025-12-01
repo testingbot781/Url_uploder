@@ -1,66 +1,114 @@
 import os
 import asyncio
+import logging
 from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from motor.motor_asyncio import AsyncIOMotorClient
+from fastapi import FastAPI
+import uvicorn
+from threading import Thread
+import time
 
+---------- ENV VARIABLES ----------
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 1598576202  # Fixed Owner ID
-LOG_CHANNEL = -1003286415377  # Fixed Logs Channel
-MONGO_URL = os.getenv("MONGO_URL")
+OWNER_ID = 1598576202
+LOG_CHANNEL = -1003286415377
+MONGO_URI = os.getenv("MONGO_URI")
 
-mongo = AsyncIOMotorClient(MONGO_URL)
-db = mongo["serena_bot"]
-premium_col = db["premium"]
+---------- Logging ----------
 
-bot = Client("serena_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+logging.basicConfig(level=logging.INFO)
 
-async def send_log(text):
-    try:
-        await bot.send_message(LOG_CHANNEL, text)
-    except:
-        pass
+---------- Mongo ----------
+
+mongo_client = AsyncIOMotorClient(MONGO_URI)
+db = mongo_client["botdb"]
+premium_collection = db["premium_users"]
+
+---------- FastAPI ----------
+
+app = FastAPI()
+
+@app.get("/")
+async def root():
+return {"status": "Bot is running ✅"}
+
+def run_web():
+uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
+---------- Pyrogram Client ----------
+
+bot = Client("url_uploader_bot",
+bot_token=BOT_TOKEN,
+api_id=API_ID,
+api_hash=API_HASH)
+
+---------- Bot Commands ----------
 
 @bot.on_message(filters.command("start"))
-async def start_cmd(client, message):
-    uid = message.from_user.id
-    await message.reply("Welcome to Technical Serena Bot ✅")
-    await send_log(f"/start {uid}")
+async def start_cmd(c: Client, m: Message):
+buttons = InlineKeyboardMarkup(
+[[InlineKeyboardButton("💻 TECHNICAL SERENA", url="https://t.me/technicalSerena")]]
+)
+await m.reply("Welcome to URL UPLOADER Bot!", reply_markup=buttons)
 
 @bot.on_message(filters.command("help"))
-async def help_cmd(client, message):
-    await message.reply(
-        "Commands:\n"
-        "/start - welcome\n"
-        "/help - this info\n"
-        "/login - save session\n"
-        "/logout - remove session\n"
-        "/get <link> - download single\n"
-        "/bulk <link> <count> - bulk\n"
-        "/addpremium <id> - owner only\n"
-        "/removepremium <id> - owner only"
-    )
+async def help_cmd(c: Client, m: Message):
+text = """
+Commands available:
 
-@bot.on_message(filters.command("addpremium") & filters.user(OWNER_ID))
-async def add_premium(client, message):
-    try:
-        uid = int(message.command[1])
-        await premium_col.update_one({"user": uid}, {"$set": {"user": uid}}, upsert=True)
-        await message.reply("Added to Premium ✅")
-        await send_log(f"Premium Added {uid}")
-    except:
-        await message.reply("Usage: /addpremium <user_id>")
+/start - Welcome message
+/help - This message
+/add_premium <user_id> - Add premium user
+/ban <user_id> - Ban user
+/bulk - Bulk message download
+/login - Optional session login
+/status - Bot alive ping
+"""
+await m.reply(text)
 
-@bot.on_message(filters.command("removepremium") & filters.user(OWNER_ID))
-async def remove_premium(client, message):
-    try:
-        uid = int(message.command[1])
-        await premium_col.delete_one({"user": uid})
-        await message.reply("Removed from Premium ✅")
-        await send_log(f"Premium Removed {uid}")
-    except:
-        await message.reply("Usage: /removepremium <user_id>")
+@bot.on_message(filters.command("add_premium"))
+async def add_premium(c: Client, m: Message):
+if m.from_user.id != OWNER_ID:
+return
+if len(m.command) != 2:
+await m.reply("Usage: /add_premium <user_id>")
+return
+user_id = int(m.command[1])
+await premium_collection.update_one({"user_id": user_id}, {"$set": {"premium": True}}, upsert=True)
+await m.reply(f"User {user_id} added as premium ✅")
 
-if __name__ == "__main__":
-    bot.run()
+@bot.on_message(filters.command("ban"))
+async def ban_user(c: Client, m: Message):
+if m.from_user.id != OWNER_ID:
+return
+if len(m.command) != 2:
+await m.reply("Usage: /ban <user_id>")
+return
+user_id = int(m.command[1])
+await premium_collection.delete_one({"user_id": user_id})
+await m.reply(f"User {user_id} banned ❌")
+
+@bot.on_message(filters.command("status"))
+async def status(c: Client, m: Message):
+await m.reply("Bot is alive and running ✅")
+
+@bot.on_message(filters.command("bulk"))
+async def bulk_download(c: Client, m: Message):
+await m.reply("Bulk download feature is in progress...")
+
+@bot.on_message(filters.command("login"))
+async def login_cmd(c: Client, m: Message):
+await m.reply("Login is optional and only for private channel access.")
+
+---------- Run Bot ----------
+
+def start_bot():
+bot.run()
+
+if name == "main":
+Thread(target=run_web).start()
+Thread(target=start_bot).start()
