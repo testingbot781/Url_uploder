@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN"))
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "1598576202"))
 LOG_CHANNEL = int(os.getenv("LOG_CHANNEL", "-1003286415377"))
 MONGO_URL = os.getenv("MONGO_URL")
