@@ -9,36 +9,38 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+# Fixed Values
 OWNER_ID = 1598576202
 LOG_CHANNEL = -1003286415377
 
+# ENV Values
 API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH"))
-BOT_TOKEN = os.getenv("BOT_TOKEN"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+# Flask for Render
 app = Flask(__name__)
 
 @app.route("/")
 def alive():
     return "✅ PRO Bot Running Smoothly"
 
-# Pyrogram Client
+# Pyrogram Bot Client
 bot = Client(
     "pro-bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    workers=100,
     in_memory=True
 )
 
-# User-specific data storage
+# User-based storage
 upload_method = {}
 replace_words = {}
 remove_words = {}
 session_strings = {}
 
-# ---- Helper Functions ----
+# -------- Helper Functions ----------
 def apply_filters(text, uid):
     if uid in replace_words:
         for old, new in replace_words[uid].items():
@@ -50,10 +52,10 @@ def apply_filters(text, uid):
 
 def progress_bar(current, total):
     pct = int(current * 100 / total)
-    bar = "█"*(pct//10) + "░"*(10 - pct//10)
+    bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
     return f"[{bar}] {pct}%"
 
-# ---- Commands ----
+# ---------- Commands ----------
 @bot.on_message(filters.command("start"))
 async def start_cmd(_, m):
     kb = InlineKeyboardMarkup([
@@ -66,13 +68,13 @@ async def start_cmd(_, m):
 async def help_cmd(_, m):
     await m.reply(
         "📘 How to Use:\n"
-        "1) Send any media link\n"
-        "2) Choose upload engine\n"
-        "3) Bot fetches & sends\n"
-        "4) Use /bulk for mass extraction"
+        "• Send media link\n"
+        "• Choose upload engine\n"
+        "• Bot fetches the file\n"
+        "• Use /bulk for multiple messages"
     )
 
-# ---- Settings Panel ----
+# -------- Settings Panel --------
 @bot.on_callback_query(filters.regex("settings"))
 async def settings(_, q):
     kb = InlineKeyboardMarkup([
@@ -95,36 +97,35 @@ async def settings(_, q):
     ])
     await q.message.edit("⚙️ Settings Panel", reply_markup=kb)
 
-# ---- Upload method selector ----
 @bot.on_callback_query(filters.regex("up_pyro"))
 async def up_pyro(_, q):
     upload_method[q.from_user.id] = "pyrogram"
-    await q.answer("Selected Pyrogram")
+    await q.answer("Pyrogram Selected")
 
 @bot.on_callback_query(filters.regex("up_tele"))
 async def up_tele(_, q):
     upload_method[q.from_user.id] = "telethon"
-    await q.answer("Selected Telethon")
+    await q.answer("Telethon Selected")
 
 @bot.on_callback_query(filters.regex("status"))
 async def status(_, q):
     await q.answer("Bot Alive ✓")
 
-# ---- Bulk ----
+# ---------- Bulk ----------
 @bot.on_callback_query(filters.regex("bulk_help"))
 async def bulk_help(_, q):
-    await q.message.edit("📥 Send message link\nThen reply count (max 500)")
+    await q.message.edit("📥 Send a message link.\nThen reply message count (max 500).")
 
 @bot.on_message(filters.command("bulk"))
 async def bulk_cmd(_, m):
-    await m.reply("📩 Step 1: Send message link\nExample: https://t.me/c/123/10")
+    await m.reply("📩 Step 1: Send message link.\nFormat: https://t.me/c/123/10")
 
-# ---- Placeholder for fetching media ----
+# ---------- Placeholder fetch ----------
 @bot.on_message(filters.regex("https://"))
 async def fetch(_, m):
-    await m.reply("⏳ Fetching & processing...\n(Feature placeholder)")
+    await m.reply("⏳ Fetching message...\n(This feature is placeholder)")
 
-# ---- Run bot ----
+# ---------- Run ----------
 async def main():
     await bot.start()
 
