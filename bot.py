@@ -1,217 +1,182 @@
 import os
 import asyncio
-from fastapi import FastAPI
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from motor.motor_asyncio import AsyncIOMotorClient
 
-# -------------------------------------------------------
-# CONFIG
-# -------------------------------------------------------
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+MONGO = os.getenv("MONGO_DB")
 
-OWNER_ID = int(os.getenv("OWNER_ID", "1598576202"))
-LOG_CHANNEL = int(os.getenv("LOG_CHANNEL", "-1003286415377"))
+OWNER_ID = 1598576202
+LOG_CHANNEL = -1003286415377
 
-# -------------------------------------------------------
-# MAIN BOT (Pyrogram)
-# -------------------------------------------------------
-bot = Client(
-    "MainBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    parse_mode=ParseMode.HTML
-)
+bot = Client("SerenaBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+mongo = AsyncIOMotorClient(MONGO)
+db = mongo["SerenaBot"]
+premium_db = db["premium"]
 
-# -------------------------------------------------------
-# FASTAPI SERVER (Render Uptime)
-# -------------------------------------------------------
-app = FastAPI()
+USER_SESSION = {}
+USER_STRING = {}
 
-@app.get("/")
-async def root():
-    return {"status": "running", "bot": "Serena MasterBot"}
+async def is_premium(uid):
+    data = await premium_db.find_one({"user_id": uid})
+    return bool(data)
 
-# -------------------------------------------------------
-# STORAGE (in-memory)
-# -------------------------------------------------------
-USER_SESSIONS = {}          # user_id : telethon_client
-USER_STRING = {}            # user_id : string_session
-
-# -------------------------------------------------------
-# COMMANDS
-# -------------------------------------------------------
+async def log(text):
+    try:
+        await bot.send_message(LOG_CHANNEL, f"📝 {text}")
+    except:
+        pass
 
 @bot.on_message(filters.command("start"))
-async def start_cmd(_, msg):
-    await msg.reply(
-        "👋 <b>Welcome to Serena Multi-Engine Bot</b>\n"
-        "Use /help to explore features."
-    )
-    await bot.send_message(LOG_CHANNEL, f"User {msg.from_user.id} used /start")
+async def start_cmd(_, m):
+    await m.reply("👋 Welcome! Session Login + Bulk Download Ready.")
+    await log(f"{m.from_user.id} used /start")
 
 @bot.on_message(filters.command("help"))
-async def help_cmd(_, msg):
-    await msg.reply(
-        "📘 <b>Help Menu</b>\n\n"
-        "⭐ Session Login Menu:\n"
+async def help_cmd(_, m):
+    await m.reply(
+        "📌 Commands:\n"
         "/string — Generate Pyrogram String\n"
-        "/login — Login using Telethon\n\n"
-        "⭐ Download Tools:\n"
-        "/get <msg_link> — download single\n"
-        "/bulk <from> <to> <channel_id> — bulk download\n"
-        "/logout — remove user session\n"
+        "/login — Login via Telethon Session\n"
+        "/logout — Remove session\n"
+        "/get <link> — Download 1 file\n"
+        "/bulk <from> <to> <channel_id> — Bulk messages\n"
+        "/addpremium <user_id>\n"
+        "/delpremium <user_id>"
     )
 
-# -------------------------------------------------------
-# STRING SESSION GENERATOR (PYROGRAM)
-# -------------------------------------------------------
+@bot.on_message(filters.command("addpremium"))
+async def add_premium(_, m):
+    if m.from_user.id != OWNER_ID:
+        return
+    if len(m.text.split()) != 2:
+        return await m.reply("Usage: /addpremium user_id")
 
-@bot.on_message(filters.command("string"))
-async def string_session(_, msg):
-    await msg.reply(
-        "🔑 <b>String Session Generator</b>\n"
-        "Open this link:\n"
-        "https://replit.com/@serena/stringgen"
-    )
+    uid = int(m.text.split()[1])
+    await premium_db.update_one({"user_id": uid}, {"$set": {"user_id": uid}}, upsert=True)
+    await m.reply("✅ Premium Added")
+    await log(f"Premium Added → {uid}")
 
-# -------------------------------------------------------
-# TELETHON USER LOGIN (SESSION CONNECT)
-# -------------------------------------------------------
+@bot.on_message(filters.command("delpremium"))
+async def del_premium(_, m):
+    if m.from_user.id != OWNER_ID:
+        return
+    if len(m.text.split()) != 2:
+        return await m.reply("Usage: /delpremium user_id")
+
+    uid = int(m.text.split()[1])
+    await premium_db.delete_one({"user_id": uid})
+    await m.reply("❌ Premium Removed")
+    await log(f"Premium Removed → {uid}")
 
 @bot.on_message(filters.command("login"))
-async def login_start(_, msg):
-    user = msg.from_user.id
-
-    await msg.reply(
-        "🔐 <b>User Login Mode</b>\n\n"
-        "Send your <code>Telethon String Session</code>"
-    )
-
-    USER_STRING[user] = "WAITING"
+async def login_cmd(_, m):
+    USER_STRING[m.from_user.id] = "WAIT"
+    await m.reply("🔐 Send your Telethon String Session now.")
 
 @bot.on_message(filters.private)
-async def get_user_session(_, msg):
-    user = msg.from_user.id
-
-    # Accept string session
-    if user in USER_STRING and USER_STRING[user] == "WAITING":
-        string = msg.text.strip()
-
+async def take_session(_, m):
+    uid = m.from_user.id
+    if uid in USER_STRING and USER_STRING[uid] == "WAIT":
         try:
+            string = m.text.strip()
             client = TelegramClient(StringSession(string), API_ID, API_HASH)
             await client.connect()
 
-            USER_SESSIONS[user] = client
-            USER_STRING[user] = string
+            USER_SESSION[uid] = client
+            USER_STRING[uid] = string
 
-            await msg.reply("✅ <b>Session Login Successfully</b>")
-            await bot.send_message(LOG_CHANNEL, f"{user} logged in successfully.")
-
+            await m.reply("✅ Session Login Successful!")
+            await log(f"{uid} logged in session")
         except Exception as e:
-            await msg.reply(f"❌ Login Failed:\n<code>{e}</code>")
-
-# -------------------------------------------------------
-# LOGOUT SESSION
-# -------------------------------------------------------
+            await m.reply(f"❌ Session Error: {e}")
 
 @bot.on_message(filters.command("logout"))
-async def logout_cmd(_, msg):
-    user = msg.from_user.id
+async def logout_cmd(_, m):
+    uid = m.from_user.id
+    if uid in USER_SESSION:
+        await USER_SESSION[uid].disconnect()
+        USER_SESSION.pop(uid)
+        USER_STRING.pop(uid, None)
+        return await m.reply("🚪 Logged out.")
 
-    if user in USER_SESSIONS:
-        await USER_SESSIONS[user].disconnect()
-        USER_SESSIONS.pop(user)
-        USER_STRING.pop(user, None)
-
-        await msg.reply("🚪 <b>Logged out successfully.</b>")
-        return
-
-    await msg.reply("❌ You are not logged in.")
-
-# -------------------------------------------------------
-# SINGLE DOWNLOAD USING USER SESSION
-# -------------------------------------------------------
+    await m.reply("❌ No active session.")
 
 @bot.on_message(filters.command("get"))
-async def get_file(_, msg):
-    user = msg.from_user.id
+async def get_file(_, m):
+    uid = m.from_user.id
 
-    if user not in USER_SESSIONS:
-        return await msg.reply("❌ First, login with /login")
+    if uid not in USER_SESSION:
+        return await m.reply("❌ Login first using /login")
 
-    parts = msg.text.split()
+    if not await is_premium(uid):
+        return await m.reply("⛔ Premium required.")
+
+    parts = m.text.split()
     if len(parts) != 2:
-        return await msg.reply("Usage: <code>/get message_link</code>")
+        return await m.reply("Usage: /get link")
 
     link = parts[1]
-    client = USER_SESSIONS[user]
+    client = USER_SESSION[uid]
 
     try:
-        await msg.reply("⏳ Downloading...")
+        await m.reply("⏳ Downloading…")
 
         entity, msg_id = await client.get_entity_from_link(link)
-        m = await client.get_messages(entity, ids=msg_id)
+        msgx = await client.get_messages(entity, ids=msg_id)
 
-        file = await client.download_media(m)
+        file = await client.download_media(msgx)
+        await bot.send_document(uid, file)
 
-        await bot.send_document(msg.chat.id, file)
-        await bot.send_message(LOG_CHANNEL, f"Downloaded one message for {user}")
+        await log(f"Single File Sent → {uid}")
 
     except Exception as e:
-        await msg.reply(f"❌ Failed:\n<code>{e}</code>")
-
-# -------------------------------------------------------
-# BULK DOWNLOAD
-# -------------------------------------------------------
+        await m.reply(f"❌ Error: {e}")
 
 @bot.on_message(filters.command("bulk"))
-async def bulk_download(_, msg):
-    user = msg.from_user.id
+async def bulk_cmd(_, m):
+    uid = m.from_user.id
 
-    if user not in USER_SESSIONS:
-        return await msg.reply("❌ First login using /login")
+    if uid not in USER_SESSION:
+        return await m.reply("❌ Login first using /login")
 
-    parts = msg.text.split()
+    if not await is_premium(uid):
+        return await m.reply("⛔ Premium required.")
+
+    parts = m.text.split()
     if len(parts) != 4:
-        return await msg.reply("Usage:\n/bulk from to channel_id")
+        return await m.reply("Usage: /bulk from to channel_id")
 
-    start = int(parts[1])
-    end = int(parts[2])
+    s = int(parts[1])
+    e = int(parts[2])
     channel = int(parts[3])
 
-    client = USER_SESSIONS[user]
-
-    await msg.reply(f"📦 <b>Bulk Download Started</b>\nRange: {start} → {end}")
+    client = USER_SESSION[uid]
+    await m.reply(f"📦 Bulk Download Started\nRange: {s}-{e}")
 
     count = 0
 
-    try:
-        for msg_id in range(start, end + 1):
-            try:
-                m = await client.get_messages(channel, ids=msg_id)
-                file = await client.download_media(m)
-                await bot.send_document(user, file)
-                count += 1
-            except:
-                pass
+    for msg_id in range(s, e + 1):
+        try:
+            x = await client.get_messages(channel, ids=msg_id)
+            file = await client.download_media(x)
+            await bot.send_document(uid, file)
+            count += 1
+            await asyncio.sleep(10)
+        except:
+            pass
 
-        await msg.reply(f"✅ <b>Bulk Completed</b>\nDownloaded: {count}")
-
-    except Exception as e:
-        await msg.reply(f"❌ Error:\n<code>{e}</code>")
-
-# -------------------------------------------------------
-# RUN BOT SAFELY
-# -------------------------------------------------------
+    await m.reply(f"✅ Completed → {count} files")
+    await log(f"Bulk Download Completed by {uid}")
 
 async def main():
     await bot.start()
-    await bot.send_message(LOG_CHANNEL, "🚀 MASTERBOT STARTED SUCCESSFULLY")
+    await log("BOT ONLINE")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
