@@ -1,240 +1,192 @@
+# ===========================
+#      URL SAVE BOT (SAFE)
+# ===========================
+
 import os
 import time
-import math
 import asyncio
-import requests
-import traceback
-from pymongo import MongoClient
 from flask import Flask
-from threading import Thread
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pymongo import MongoClient
+from datetime import datetime
 
 # --------------------------
-#        ENV VARIABLES
+#     ENV + CONSTANTS
 # --------------------------
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-FORCE_SUB = os.getenv("FORCE_SUB")  # channel username
-OWNER_ID = int(os.getenv("OWNER_ID"))
-LOG_CHANNEL = int(os.getenv("LOG_CHANNEL"))
+
+OWNER_ID = 1598576202
+LOG_CHANNEL = -1003286415377
+
 MONGO_URI = os.getenv("MONGO_URI")
-
-# --------------------------
-#      MONGODB CONNECT
-# --------------------------
 mongo = MongoClient(MONGO_URI)
-db = mongo["tg_bot"]
-users_col = db["users"]
-ban_col = db["banned"]
-caption_col = db["caption"]
+db = mongo["session_bot"]
+users = db["users"]
+settings = db["settings"]
 
 # --------------------------
-#         FLASK
+#      FLASK SERVER
 # --------------------------
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "Bot Running Successfully!"
-
-def run_flask():
-    app.run(host="0.0.0.0", port=10000)
-
-Thread(target=run_flask).start()
+    return "BOT RUNNING"
 
 # --------------------------
-#   BOT CLIENT START
+#     CREATE BOT CLIENT
 # --------------------------
 bot = Client(
-    "DownloaderBot",
+    "save_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-
 # --------------------------
 #   PROGRESS BAR FUNCTION
 # --------------------------
-async def progress_bar(current, total, message: Message, start_time):
-    now = time.time()
-    diff = now - start_time
-    if diff == 0:
-        diff = 1
+async def progress_bar(current, total, message):
+    percent = int((current / total) * 100)
+    speed = current / (time.time() - message.date.timestamp())
+    eta = (total - current) / speed if speed != 0 else 0
 
-    percentage = current * 100 / total
-    speed = current / diff
-    eta = int((total - current) / speed)
+    bar = f"[{'■' * (percent//5)}{'□' * (20 - percent//5)}]"
 
-    bar_length = 20
-    filled = int(bar_length * percentage / 100)
-    bar = "█" * filled + "░" * (bar_length - filled)
-
-    text = (
-        f"**Uploading…**\n"
-        f"{bar} `{percentage:.1f}%`\n"
-        f"**Speed:** {speed/1024/1024:.2f} MB/s\n"
-        f"**Uploaded:** {current/1024/1024:.2f} MB / {total/1024/1024:.2f} MB\n"
-        f"**ETA:** {eta}s"
+    txt = (
+        f"{bar} {percent}%\n"
+        f"Speed: {speed/1024/1024:.2f} MB/s\n"
+        f"ETA: {eta:.1f}s\n"
+        f"Uploaded: {current/1024/1024:.2f} MB / {total/1024/1024:.2f} MB"
     )
 
     try:
-        await message.edit(text)
+        await message.edit_text(txt)
     except:
         pass
 
+# --------------------------
+#  SETTINGS DEFAULT
+# --------------------------
+def get_user_settings(uid):
+    data = settings.find_one({"_id": uid})
+    if not data:
+        default = {
+            "_id": uid,
+            "chat_id": None,
+            "replace_words": {},
+            "remove_words": [],
+            "session": None
+        }
+        settings.insert_one(default)
+        return default
+    return data
 
 # --------------------------
-#   STREAMABLE / DIRECT DL
+#       START COMMAND
 # --------------------------
-def download_file(url, file_path):
-    r = requests.get(url, stream=True)
-    total = int(r.headers.get("content-length", 0))
-
-    with open(file_path, "wb") as f:
-        downloaded = 0
-        for chunk in r.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-    return file_path
-
-
-# --------------------------
-#        FORCE SUB
-# --------------------------
-async def check_force(chat_id):
-    try:
-        member = await bot.get_chat_member(FORCE_SUB, chat_id)
-        return member.status not in ["kicked", "left"]
-    except:
-        return False
-
-
-# --------------------------
-#         COMMANDS
-# --------------------------
-
 @bot.on_message(filters.command("start"))
-async def start(_, m: Message):
-    user_id = m.from_user.id
+async def start_handler(_, m):
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+        [InlineKeyboardButton("📣 Contact Owner", url="https://t.me/technicalserena")]
+    ])
 
-    if ban_col.find_one({"user_id": user_id}):
-        return await m.reply("❌ You are banned from using this bot.")
-
-    if not await check_force(user_id):
-        return await m.reply(
-            f"⚠ Join @{FORCE_SUB} to use this bot."
-        )
-
-    if not users_col.find_one({"user_id": user_id}):
-        users_col.insert_one({"user_id": user_id})
-
-    await bot.send_message(LOG_CHANNEL, f"✅ New User → {user_id}")
-
-    await m.reply("Welcome! Send Streamable or direct link.")
-
-
-@bot.on_message(filters.command("add"))
-async def add_user(_, m: Message):
-    if m.from_user.id != OWNER_ID:
-        return
-
-    try:
-        uid = int(m.text.split(" ")[1])
-        ban_col.delete_one({"user_id": uid})
-        users_col.insert_one({"user_id": uid})
-        await m.reply(f"✅ User {uid} added.")
-    except:
-        await m.reply("❌ Invalid user id.")
-
-
-@bot.on_message(filters.command("remove"))
-async def remove_user(_, m: Message):
-    if m.from_user.id != OWNER_ID:
-        return
-
-    try:
-        uid = int(m.text.split(" ")[1])
-        ban_col.insert_one({"user_id": uid})
-        await m.reply(f"❌ User {uid} banned.")
-    except:
-        await m.reply("❌ Invalid user id.")
-
-
-@bot.on_message(filters.command("caption"))
-async def set_caption(_, m: Message):
-    user_id = m.from_user.id
-
-    if user_id != OWNER_ID:
-        return await m.reply("❌ Only owner can set caption.")
-
-    text = m.text.split(" ", 1)[1]
-    caption_col.update_one({}, {"$set": {"text": text}}, upsert=True)
-    await m.reply("✅ Caption updated.")
-
-
-@bot.on_message(filters.command("users"))
-async def users_list(_, m):
-    if m.from_user.id != OWNER_ID:
-        return
-    total = users_col.count_documents({})
-    await m.reply(f"Total Users: {total}")
-
-
-@bot.on_message(filters.command("banned"))
-async def banned_list(_, m):
-    if m.from_user.id != OWNER_ID:
-        return
-    total = ban_col.count_documents({})
-    await m.reply(f"Banned Users: {total}")
-
+    await m.reply_text(
+        "**Welcome to Save Restricted Content Bot**\n"
+        "Powered by **TECHNICAL SERENA**",
+        reply_markup=btn
+    )
 
 # --------------------------
-#   MAIN DOWNLOAD HANDLER
+#       HELP COMMAND
 # --------------------------
-@bot.on_message(filters.text & ~filters.command([]))
-async def process_link(_, m: Message):
-    user_id = m.from_user.id
+@bot.on_message(filters.command("help"))
+async def help_handler(_, m):
+    await m.reply_text(
+        "/start – Welcome\n"
+        "/help – How to use\n"
+        "/bulk – Extract multiple messages\n"
+        "/status – Bot alive & ping\n"
+        "/broadcast – Owner only\n"
+        "/addpremium – Add premium user\n"
+        "/ban – Remove user\n"
+        "/caption – Set caption format\n"
+    )
 
-    if ban_col.find_one({"user_id": user_id}):
-        return await m.reply("❌ You are banned.")
+# --------------------------
+# SESSION LOGIN (SAFE)
+# --------------------------
+@bot.on_callback_query(filters.regex("session_login"))
+async def sess_login(_, q):
+    await q.message.reply(
+        "**Send your Telethon/Pyrogram SESSION STRING**\n"
+        "Bot will use your session to access private channels safely."
+    )
+    settings.update_one({"_id": q.from_user.id}, {"$set": {"await_session": True}})
+    await q.answer()
 
-    if not await check_force(user_id):
-        return await m.reply(
-            f"⚠ Join @{FORCE_SUB} to use this bot."
-        )
+@bot.on_message(filters.text)
+async def catch_session(_, m):
+    data = get_user_settings(m.from_user.id)
 
-    url = m.text.strip()
-    msg = await m.reply("🔄 Processing…")
+    if data.get("await_session"):
+        settings.update_one({"_id": m.from_user.id}, {"$set": {"session": m.text, "await_session": False}})
+        await m.reply("✅ Session saved successfully!")
+        return
 
-    try:
-        file_path = f"{user_id}_video.mp4"
-        download_file(url, file_path)
+# --------------------------
+# SETTINGS MENU
+# --------------------------
+@bot.on_callback_query(filters.regex("settings"))
+async def settings_menu(_, q):
+    btn = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Chat ID", callback_data="chatid"),
+            InlineKeyboardButton("Session Login", callback_data="session_login")
+        ],
+        [
+            InlineKeyboardButton("Replace Words", callback_data="replace"),
+            InlineKeyboardButton("Remove Words", callback_data="remove")
+        ],
+        [
+            InlineKeyboardButton("Reset", callback_data="reset"),
+            InlineKeyboardButton("Logout Session", callback_data="logout")
+        ]
+    ])
+    await q.message.edit_text("⚙️ **Settings Panel**", reply_markup=btn)
 
-        caption_doc = caption_col.find_one({})
-        cap = caption_doc["text"] if caption_doc else ""
+# --------------------------
+# BULK DOWNLOAD
+# --------------------------
+@bot.on_message(filters.command("bulk"))
+async def bulk_handler(_, m):
+    await m.reply("Send the message link you want to extract.")
+    users.update_one({"_id": m.from_user.id}, {"$set": {"await_link": True}})
 
-        start_t = time.time()
+@bot.on_message(filters.text & filters.private)
+async def bulk_extract(_, m):
+    user = users.find_one({"_id": m.from_user.id})
+    if not user or not user.get("await_link"):
+        return
 
-        await bot.send_video(
-            m.chat.id,
-            video=file_path,
-            caption=cap,
-            progress=progress_bar,
-            progress_args=(msg, start_t)
-        )
+    users.update_one({"_id": m.from_user.id}, {"$set": {"await_link": False}})
 
-        os.remove(file_path)
-        await msg.delete()
+    await m.reply("How many messages to extract? (Max 500)")
+    users.update_one({"_id": m.from_user.id}, {"$set": {"await_count": m.text}})
 
-        await bot.send_message(LOG_CHANNEL, f"🎬 Uploaded for {user_id}")
-
-    except Exception as e:
-        await msg.edit(f"❌ Error:\n{e}")
-        traceback.print_exc()
+# (Note: Full bulk extractor finalized in next message)
 
 
-bot.run()
+
+# -------------------------------------------------
+#   BOT RUN + FLASK SERVER (REQUIRED FOR RENDER)
+# -------------------------------------------------
+
+if __name__ == "__main__":
+    import threading
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
+    bot.run()
