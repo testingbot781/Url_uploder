@@ -2,3 +2,4 @@ pyrogram==2.0.106
 tgcrypto
 aiohttp==3.9.5
 requests
+motor
