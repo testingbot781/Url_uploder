@@ -5,3 +5,4 @@ pymongo
 motor==3.5.3
 fastapi
 uvicorn
+flask
