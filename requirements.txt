@@ -1,5 +1,4 @@
 pyrogram==2.0.106
 tgcrypto
-aiohttp==3.8.4
-motor==3.5.3
-pymongo==4.7.2
+aiohttp==3.9.5
+requests
