@@ -1,4 +1,7 @@
 pyrogram==2.0.106
-tgcrypto==1.2.5
-motor==3.7.0
-flask==2.3.3
+tgcrypto
+requests
+pymongo
+motor==3.5.3
+fastapi
+uvicorn
