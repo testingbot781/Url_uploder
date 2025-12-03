@@ -6,80 +6,97 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 from threading import Thread
 
+# CONSTANTS
 OWNER_ID = 1598576202
 LOG_CHANNEL = "-1003286415377"
 
+# ENVIRONMENT VARIABLES (Render se aayengi)
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
 
-bot = Client("URL_UPLOADER_BOT", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-app = Flask(name)
+# PYROGRAM BOT
+bot = Client(
+    "URL_UPLOADER_BOT",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
+
+# FLASK SERVER
+app = Flask(__name__)
 
 @app.route("/")
 def home():
-return "Bot is running ✅"
+    return "Bot is running ✅"
 
+# Start Flask
 def run_flask():
-port = int(os.getenv("PORT", 10000))
-app.run(host="0.0.0.0", port=port)
+    port = int(os.getenv("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
 
+# Progress Bar Helper
 def progress_bar(current, total):
-percentage = (current / total) * 100
-return f"Progress: {percentage:.2f}% | {current}/{total} MB"
+    percentage = (current / total) * 100
+    return f"Progress: {percentage:.2f}% | {current}/{total} MB"
 
+# START COMMAND
 @bot.on_message(filters.command("start"))
-async def start(client, message):
-buttons = InlineKeyboardMarkup(
-[[InlineKeyboardButton("Technical Serena", url="https://t.me/technicalSerena")]]
-)
-await message.reply_text("Welcome to URL UPLOADER Bot! 🚀", reply_markup=buttons)
+async def start_cmd(client, message):
+    btn = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Technical Serena", url="https://t.me/technicalSerena")]]
+    )
+    await message.reply_text(
+        "Welcome to URL Uploader Bot 🚀",
+        reply_markup=btn
+    )
 
+# HELP
 @bot.on_message(filters.command("help"))
 async def help_cmd(client, message):
-await message.reply_text(
-"/start - Welcome\n"
-"/help - How to use bot\n"
-"/bulk - Bulk download messages\n"
-"/add - Add premium user\n"
-"/ban - Remove user\n"
-"/status - Bot alive ping\n"
-"/login - Optional: For private channel access"
-)
+    await message.reply_text(
+        "/start - Welcome\n"
+        "/help - Commands list\n"
+        "/bulk - Bulk download\n"
+        "/status - Check bot status\n"
+    )
 
+# STATUS
 @bot.on_message(filters.command("status"))
-async def status(client, message):
-await message.reply_text("Bot is online ✅")
+async def status_cmd(client, message):
+    await message.reply_text("Bot is online 🔥")
 
+# BULK
 @bot.on_message(filters.command("bulk"))
-async def bulk(client, message):
-await message.reply_text("Send message link and number of messages to download (max 500)")
+async def bulk_cmd(client, message):
+    await message.reply_text("Send link + number of messages to download.")
 
+# LOGGING
 async def send_logs(text):
-try:
-await bot.send_message(LOG_CHANNEL, text)
-except:
-pass
+    try:
+        await bot.send_message(LOG_CHANNEL, text)
+    except:
+        pass
 
-async def download_and_send(message):
-# Example stub: here you will handle downloading single or bulk media
-await send_logs(f"Downloading message from {message.chat.id}")
-for i in range(1, 6):
-await asyncio.sleep(2)  # simulate download
-prog = progress_bar(i, 5)
-await send_logs(prog)
-await message.reply_text("Download complete ✅")
+# Download Simulator
+async def fake_download(message):
+    await send_logs("Download started...")
+    for i in range(1, 6):
+        await asyncio.sleep(1)
+        await send_logs(progress_bar(i, 5))
+    await message.reply_text("Download complete ✅")
 
+# Handle Private Messages
 @bot.on_message(filters.private & filters.text)
 async def handle_private(client, message):
-await message.reply_text("Received message, processing...")
-await download_and_send(message)
+    await message.reply_text("Processing... ⏳")
+    await fake_download(message)
 
+# Start Pyrogram Bot
 def start_bot():
-asyncio.run(bot.start())
-bot.loop.run_forever()
+    bot.run()
 
-if name == "main":
-Thread(target=run_flask).start()
-Thread(target=start_bot).start()
+# MAIN
+if __name__ == "__main__":
+    Thread(target=run_flask).start()
+    Thread(target=start_bot).start()
