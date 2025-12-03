@@ -1,8 +1,0 @@
-pyrogram==2.0.106
-tgcrypto
-requests
-pymongo
-motor==3.5.3
-fastapi
-uvicorn
-flask
